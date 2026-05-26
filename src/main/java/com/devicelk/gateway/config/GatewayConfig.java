@@ -11,6 +11,8 @@ import org.springframework.cloud.client.circuitbreaker.Customizer;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -34,6 +36,7 @@ public class GatewayConfig {
      * fall back to the remote IP so we don't accidentally bypass the limiter entirely.
      */
     @Bean
+    @Primary
     public KeyResolver userKeyResolver() {
         return exchange -> {
             String userId = exchange.getRequest().getHeaders().getFirst(USER_HEADER);
@@ -98,10 +101,15 @@ public class GatewayConfig {
 
     /** Tags every metric in the registry with the application name. */
     @Bean
-    public io.micrometer.core.instrument.config.MeterFilter commonTags(MeterRegistry registry) {
-        return io.micrometer.core.instrument.config.MeterFilter
-                .commonTags(io.micrometer.core.instrument.Tags.of("service", "api-gateway"));
-    }
+    public io.micrometer.core.instrument.config.MeterFilter commonTags() {
+    return io.micrometer.core.instrument.config.MeterFilter.commonTags(
+        io.micrometer.core.instrument.Tags.of(
+            "application", "devicelk-api-gateway",
+            "environment", "${spring.profiles.active:default}",
+            "instance", "${HOSTNAME:unknown}"
+        )
+    );
+}
 
     /**
      * Publishes a numeric gauge per breaker — 0=CLOSED, 1=OPEN, 2=HALF_OPEN — under the metric

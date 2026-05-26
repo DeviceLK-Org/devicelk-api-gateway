@@ -28,10 +28,16 @@ import java.util.stream.Collectors;
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
-    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    // @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    // private List<String> allowedOrigins;
+
+    // @Value("${app.security.public-paths:#{/api/auth/**,/actuator/health,/actuator/health/**,/actuator/info,/actuator/prometheus,/fallback/**}}")
+    // private List<String> publicPaths;
+
+    @Value("#{'${app.cors.allowed-origins:http://localhost:3000}'.split(',')}")
     private List<String> allowedOrigins;
 
-    @Value("${app.security.public-paths}")
+    @Value("#{'${app.security.public-paths:/api/auth/**,/actuator/health,/actuator/health/**,/actuator/info,/actuator/prometheus,/fallback/**}'.split(',')}")
     private List<String> publicPaths;
 
     @Bean

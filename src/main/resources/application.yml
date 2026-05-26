@@ -45,10 +45,10 @@ spring:
             - StripPrefix=1
 
         # ----- Product service -----
-        - id: product-service
-          uri: lb://product-service
+        - id: devicelk-inventory-service
+          uri: lb://devicelk-inventory-service
           predicates:
-            - Path=/api/products/**
+            - Path=/api/inventory/**
           filters:
             - StripPrefix=1
             - name: CircuitBreaker
@@ -76,8 +76,8 @@ spring:
             connect-timeout: 3000
 
         # ----- AI service (slower; more tolerant timeout & lower rate limit) -----
-        - id: ai-service
-          uri: lb://ai-service
+        - id: devicelk-ai-retrieval-service
+          uri: lb://devicelk-ai-retrieval-service
           predicates:
             - Path=/api/ai/**
           filters:
@@ -218,6 +218,8 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+      # environment: ${spring.profiles.active:default}
+      # instance: ${HOSTNAME:unknown}
     distribution:
       percentiles-histogram:
         http.server.requests: true
