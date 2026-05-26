@@ -1,63 +1,240 @@
 server:
   port: 8080
+  # Allow in-flight requests to complete before shutdown
+  shutdown: graceful
 
 spring:
   application:
     name: devicelk-api-gateway
 
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Short timeouts so a Redis blip can't stall the gateway; rate limiter falls open on Redis errors.
+      timeout: 2s
+      connect-timeout: 2s
+
   cloud:
     gateway:
-      # Disable auto-discovery routing — explicit routes below are the single source of truth.
-      # With locator enabled, Gateway also generates routes like /PRODUCT-SERVICE/** which
-      # conflicts with your hand-crafted /api/products/** routes.
+      # Auto-discovery would generate a duplicate /SERVICE-NAME/** route per Eureka entry that
+      # competes with the hand-crafted /api/* routes below. Keep it off so routes here are authoritative.
       discovery:
         locator:
           enabled: false
+
+      # Default response timeouts. Per-route overrides are applied via metadata.response-timeout below.
+      httpclient:
+        response-timeout: 5s
+        connect-timeout: 3000
+
+      default-filters:
+        # Tracing propagation: forward B3 headers to downstream so the trace stays stitched.
+        - PreserveHostHeader
+
       routes:
-        - id: devicelk-product-service
-          uri: lb://PRODUCT-SERVICE
+        # ----- Public auth passthrough to Keycloak (no JWT required, no rate limiter, no CB) -----
+        - id: keycloak-auth
+          uri: ${KEYCLOAK_BASE_URL:http://localhost:8180}
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+
+        # ----- Product service -----
+        - id: product-service
+          uri: lb://product-service
           predicates:
             - Path=/api/products/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: product-service-cb
+                fallbackUri: forward:/fallback/product-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userKeyResolver}"
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET
+                statuses: SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 1s
+                  factor: 2
+                  basedOnPreviousValue: false
+          metadata:
+            response-timeout: 5000
+            connect-timeout: 3000
 
-        - id: devicelk-knowledge-ingestion
-          uri: lb://KNOWLEDGE-INGESTION
-          predicates:
-            - Path=/api/ingestion/**
-
-        - id: devicelk-ai-retrieval
-          uri: lb://AI-RETRIEVAL
+        # ----- AI service (slower; more tolerant timeout & lower rate limit) -----
+        - id: ai-service
+          uri: lb://ai-service
           predicates:
             - Path=/api/ai/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: ai-service-cb
+                fallbackUri: forward:/fallback/ai-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userKeyResolver}"
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET
+                statuses: SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT
+                backoff:
+                  firstBackoff: 200ms
+                  maxBackoff: 2s
+                  factor: 2
+                  basedOnPreviousValue: false
+          metadata:
+            response-timeout: 10000
+            connect-timeout: 3000
+
+        # ----- Ingestion service -----
+        - id: ingestion-service
+          uri: lb://ingestion-service
+          predicates:
+            - Path=/api/ingest/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: ingestion-service-cb
+                fallbackUri: forward:/fallback/ingestion-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userKeyResolver}"
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET
+                statuses: SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT
+                backoff:
+                  firstBackoff: 100ms
+                  maxBackoff: 1s
+                  factor: 2
+                  basedOnPreviousValue: false
+          metadata:
+            response-timeout: 5000
+            connect-timeout: 3000
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/DeviceLK-Realm}
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/DeviceLK/protocol/openid-connect/certs}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/devicelk}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/devicelk/protocol/openid-connect/certs}
 
 eureka:
   client:
     service-url:
       defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
 
-# CORS allowed origins — override in prod via env var or application-prod.yml
+# CORS allowed origins — override in prod via env var
 app:
   cors:
     allowed-origins:
       - http://localhost:3000
+  security:
+    public-paths:
+      - /api/auth/**
+      - /actuator/health
+      - /actuator/health/**
+      - /actuator/info
+      - /actuator/prometheus
+      - /fallback/**
+  health:
+    keycloak-url: ${KEYCLOAK_HEALTH_URL:http://localhost:8180/realms/devicelk}
 
-# Expose health and info for container probes; restrict everything else
+# ----- Resilience4j per-service circuit breakers -----
+resilience4j:
+  circuitbreaker:
+    instances:
+      product-service-cb:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+      ai-service-cb:
+        # AI calls are inherently slower; widen window & loosen failure threshold so
+        # ordinary latency spikes don't pop the breaker.
+        slidingWindowSize: 5
+        failureRateThreshold: 40
+        waitDurationInOpenState: 60s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true
+      ingestion-service-cb:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+  timelimiter:
+    instances:
+      product-service-cb:
+        timeoutDuration: 5s
+      ai-service-cb:
+        timeoutDuration: 10s
+      ingestion-service-cb:
+        timeoutDuration: 5s
+
+# ----- Observability -----
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info,prometheus,metrics,gateway
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always
+      probes:
+        enabled: true
+    gateway:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        gateway.request.duration: true
+  tracing:
+    sampling:
+      # 100% in dev — override to 0.1 in prod via env/profile.
+      probability: ${TRACING_SAMPLING:1.0}
+    propagation:
+      type: B3
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
 
 logging:
   level:
     com.devicelk: DEBUG
     org.springframework.cloud.gateway: INFO
+    org.springframework.security: INFO
+    reactor.netty.http.client: INFO

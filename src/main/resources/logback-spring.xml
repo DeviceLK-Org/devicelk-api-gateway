@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="appName" source="spring.application.name"/>
+
+    <!--
+      Structured JSON appender: every line includes traceId/spanId from Micrometer Tracing's
+      MDC (via Brave) plus any keys we put into MDC ourselves (correlationId, userId, etc.).
+      Log aggregators (Loki, ELK, Datadog) can index these without regex parsing.
+    -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <version/>
+                <logLevel/>
+                <loggerName/>
+                <threadName/>
+                <message/>
+                <stackTrace/>
+                <pattern>
+                    <pattern>
+                        {
+                          "app": "${appName:-devicelk-api-gateway}",
+                          "traceId": "%mdc{traceId:-}",
+                          "spanId": "%mdc{spanId:-}",
+                          "correlationId": "%mdc{correlationId:-}",
+                          "userId": "%mdc{userId:-}"
+                        }
+                    </pattern>
+                </pattern>
+                <mdc>
+                    <excludeMdcKeyName>traceId</excludeMdcKeyName>
+                    <excludeMdcKeyName>spanId</excludeMdcKeyName>
+                    <excludeMdcKeyName>correlationId</excludeMdcKeyName>
+                    <excludeMdcKeyName>userId</excludeMdcKeyName>
+                </mdc>
+            </providers>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="JSON"/>
+    </root>
+</configuration>
