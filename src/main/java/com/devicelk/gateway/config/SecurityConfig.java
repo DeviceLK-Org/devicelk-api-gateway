@@ -54,10 +54,18 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
 
                         // Write operations on products are admin-only.
-                        .pathMatchers(HttpMethod.POST, "/api/products/**").hasRole("ADMIN")
-                        .pathMatchers(HttpMethod.PUT, "/api/products/**").hasRole("ADMIN")
-                        .pathMatchers(HttpMethod.DELETE, "/api/products/**").hasRole("ADMIN")
-                        .pathMatchers(HttpMethod.GET, "/api/products/**").hasAnyRole("USER", "ADMIN")
+                        // .pathMatchers(HttpMethod.POST, "/api/products/**").hasRole("ADMIN")
+                        // .pathMatchers(HttpMethod.PUT, "/api/products/**").hasRole("ADMIN")
+                        // .pathMatchers(HttpMethod.DELETE, "/api/products/**").hasRole("ADMIN")
+                        // .pathMatchers(HttpMethod.GET, "/api/products/**").hasAnyRole("USER", "ADMIN")
+
+                        .pathMatchers(HttpMethod.GET, "/api/inventory/**").hasAnyRole("USER","ADMIN")
+                        .pathMatchers(HttpMethod.POST, "/api/inventory/**").hasRole("ADMIN")
+                        .pathMatchers(HttpMethod.PUT, "/api/inventory/**").hasRole("ADMIN")
+                        .pathMatchers(HttpMethod.PATCH, "/api/inventory/**").hasRole("ADMIN")
+                        .pathMatchers(HttpMethod.DELETE, "/api/inventory/**").hasRole("ADMIN")
+
+
 
                         .pathMatchers("/api/ai/**").hasAnyRole("USER", "ADMIN")
                         .pathMatchers("/api/ingest/**").hasRole("ADMIN")
