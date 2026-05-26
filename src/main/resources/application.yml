@@ -1,0 +1,63 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: devicelk-api-gateway
+
+  cloud:
+    gateway:
+      # Disable auto-discovery routing — explicit routes below are the single source of truth.
+      # With locator enabled, Gateway also generates routes like /PRODUCT-SERVICE/** which
+      # conflicts with your hand-crafted /api/products/** routes.
+      discovery:
+        locator:
+          enabled: false
+      routes:
+        - id: devicelk-product-service
+          uri: lb://PRODUCT-SERVICE
+          predicates:
+            - Path=/api/products/**
+
+        - id: devicelk-knowledge-ingestion
+          uri: lb://KNOWLEDGE-INGESTION
+          predicates:
+            - Path=/api/ingestion/**
+
+        - id: devicelk-ai-retrieval
+          uri: lb://AI-RETRIEVAL
+          predicates:
+            - Path=/api/ai/**
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/DeviceLK-Realm}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/DeviceLK/protocol/openid-connect/certs}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+
+# CORS allowed origins — override in prod via env var or application-prod.yml
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+
+# Expose health and info for container probes; restrict everything else
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.devicelk: DEBUG
+    org.springframework.cloud.gateway: INFO
