@@ -1,4 +1,4 @@
-package com.devicelk.exception;
+package com.devicelk.gateway.exception;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,11 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Global error handler for the API Gateway.
+ * Catches anything that escapes the filter chain and renders it as a JSON error envelope.
  *
- * Ordered at -1 so it takes priority over Spring Boot's DefaultErrorWebExceptionHandler
- * (which is ordered at Integer.MIN_VALUE + 1 = -2147483647, but DefaultErrorWebExceptionHandler
- * uses Ordered.HIGHEST_PRECEDENCE + 1; we use -1 to sit above the default handler cleanly).
+ * Ordered at -1 so this handler sits above Spring Boot's DefaultErrorWebExceptionHandler.
  */
 @Component
 @Order(-1)
@@ -46,18 +44,14 @@ public class GlobalErrorHandler implements ErrorWebExceptionHandler {
 
         if (ex instanceof ResponseStatusException rse) {
             status = HttpStatus.valueOf(rse.getStatusCode().value());
-            // Use the reason phrase if present; otherwise fall back to the exception message
             message = rse.getReason() != null ? rse.getReason() : ex.getMessage();
         } else if (ex instanceof AccessDeniedException) {
-            // Authenticated user lacks the required role/scope
             status = HttpStatus.FORBIDDEN;
             message = "You do not have permission to access this resource";
         } else if (ex instanceof JwtValidationException) {
-            // Expired, tampered, or otherwise invalid JWT
             status = HttpStatus.UNAUTHORIZED;
             message = "Invalid or expired token";
         } else {
-            // Unexpected errors — log the full stack trace but don't leak details to the client
             log.error("Unhandled gateway error on [{}] {}",
                     exchange.getRequest().getMethod(),
                     exchange.getRequest().getPath().value(),
